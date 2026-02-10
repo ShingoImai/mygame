@@ -368,19 +368,23 @@
             }
         }
 
-        // 敵の更新（移動と回転）
+        // 敵の更新（移動）
         function updateEnemies() {
             for (let i = enemies.length - 1; i >= 0; i--) {
                 enemies[i].y += enemies[i].speed; // 下に移動
-                enemies[i].rotation += enemies[i].rotationSpeed; // 回転を更新
 
-                // 敵が画面下部に到達したらライフを減らす
-                if (enemies[i].y - enemies[i].size / 2 > canvas.height) { // 敵全体が画面外に出たら
-                    enemies.splice(i, 1); // 敵を削除
-                    lives--; // ライフを減らす
-                    updateUI(); // UI更新
-                    if (lives <= 0) {
-                        endGame(); // ライフが0になったらゲームオーバー
+                // ひらがなが画面下部に到達した場合
+                if (enemies[i].y - enemies[i].size / 2 > canvas.height) {
+                    const isTarget = enemies[i].char === targetHiragana;
+                    enemies.splice(i, 1); // ひらがなを削除
+
+                    // ターゲットのひらがなが落ちた場合のみライフを減らす
+                    if (isTarget) {
+                        lives--;
+                        updateUI();
+                        if (lives <= 0) {
+                            endGame();
+                        }
                     }
                 }
             }
