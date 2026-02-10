@@ -392,9 +392,10 @@
 
         // 敵（ひらがな）の生成
         function spawnEnemy() {
-            // 30%の確率でターゲットのひらがなを出現させる
+            // 画面上にターゲットがなければ必ず出す、あれば30%の確率
+            const hasTarget = enemies.some(e => e.char === targetHiragana);
             let char;
-            if (Math.random() < 0.3 && targetHiragana) {
+            if (targetHiragana && (!hasTarget || Math.random() < 0.3)) {
                 char = targetHiragana;
             } else {
                 char = HIRAGANA[Math.floor(Math.random() * HIRAGANA.length)];
