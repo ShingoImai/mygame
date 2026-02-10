@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a browser-based arcade shooting game (シューティングゲーム) built as a single self-contained HTML file. The player controls a cannon at the bottom of the screen, firing bullets at descending enemies to score points.
+This is a browser-based hiragana learning shooting game (ひらがなシューティング) built as a single self-contained HTML file. The player controls a cannon at the bottom of the screen. Hiragana characters fall from above, and the game speaks a target hiragana aloud. The player scores points by shooting the correct hiragana that matches the spoken sound.
 
 ## Repository Structure
 
@@ -19,6 +19,7 @@ This is a single-file project with no build system, package manager, or external
 - **CSS3** - Embedded styling (dark theme, responsive layout)
 - **JavaScript (ES6+)** - Game logic using Canvas 2D API
 - **Tone.js v14.8.49** - Audio synthesis (loaded via CDN)
+- **Web Speech API** - Speech synthesis for reading hiragana aloud
 - **Google Fonts** - Inter font family (loaded via CDN)
 
 ## How to Run
@@ -42,41 +43,47 @@ All code lives in `index.html`, organized into these sections:
 
 ### JavaScript (lines 126-579, embedded `<script>`)
 
-**Constants & State (lines 127-163)**
-- Game constants: `PLAYER_SIZE`, `BULLET_SIZE`, `BULLET_SPEED`, `ENEMY_SIZE_LARGE/SMALL`, etc.
-- Mutable state: `player`, `bullets[]`, `enemies[]`, `score`, `lives`, `gameRunning`
+**Constants & State (lines 127-178)**
+- Game constants: `PLAYER_SIZE`, `BULLET_SIZE`, `BULLET_SPEED`, `ENEMY_SIZE`, `POINTS_CORRECT`, `HIRAGANA[]`
+- Mutable state: `player`, `bullets[]`, `enemies[]`, `score`, `lives`, `gameRunning`, `targetHiragana`
 
-**Audio System (lines 165-244)**
-- Tone.js synthesizers: `bulletSynth`, `largeEnemyHitSynth`, `smallEnemyHitSynth`, `gameOverSynth`, `bgmSynth`
+**Audio System (lines 180-259)**
+- Tone.js synthesizers: `bulletSynth`, `largeEnemyHitSynth` (correct hit), `smallEnemyHitSynth` (wrong hit), `gameOverSynth`, `bgmSynth`
 - BGM chord progression: C major -> Bb major -> Ab major -> G major (looping)
+- Web Speech API: `speakHiragana()` reads the target hiragana aloud in Japanese
 
-**Core Functions (lines 246-528)**
+**Core Functions (lines 261-559)**
 | Function | Purpose |
 |---|---|
+| `speakHiragana(char)` | Reads a hiragana character aloud using Web Speech API |
+| `selectNewTarget()` | Picks a random hiragana as the new target and speaks it |
 | `resizeCanvas()` | Responsive canvas sizing on window resize |
 | `drawPlayer()` | Renders cannon (base, body, barrel, wheels) |
 | `drawBullet(bullet)` | Renders yellow square bullets |
-| `drawEnemy(enemy)` | Renders amoeba-shaped enemies with rotation |
+| `drawEnemy(enemy)` | Renders falling hiragana characters as text |
 | `updateBullets()` | Moves bullets upward, removes off-screen |
-| `updateEnemies()` | Moves enemies downward, decrements lives when they pass |
-| `spawnEnemy()` | Creates random enemies (50% large red / 50% small purple) |
+| `updateEnemies()` | Moves hiragana downward, decrements lives when they pass |
+| `spawnEnemy()` | Creates hiragana enemies (30% target, 70% random) |
 | `checkCollision(obj1, obj2)` | AABB collision detection |
-| `handleCollisions()` | Processes bullet-enemy hits, awards points |
+| `handleCollisions()` | Checks if hit hiragana matches target; awards points on correct |
 | `gameLoop(currentTime)` | Main loop via `requestAnimationFrame` |
-| `startGame()` | Initializes state, starts BGM and game loop |
-| `endGame()` | Stops game, shows game-over screen |
+| `startGame()` | Initializes state, starts BGM, selects first target |
+| `endGame()` | Stops game, speech, shows game-over screen |
 | `fireBullet()` | Creates bullet at cannon barrel position |
 
-**Event Listeners (lines 531-578)**
+**Event Listeners (lines 561-615)**
 - `mousemove` / `touchmove` - Move cannon horizontally
 - `click` / `touchend` - Fire bullets
 - Start button click - Begin/restart game
+- Target display click - Replay target hiragana sound
 
 ## Game Mechanics
 
-- **Scoring**: Large enemies (red) = 10 pts, Small enemies (purple) = 30 pts
-- **Lives**: Start with 3; lose one when an enemy reaches the bottom
-- **Enemy spawn**: Every 1000ms, random position, speed between 1-3
+- **Target system**: A random hiragana is selected and spoken aloud; displayed in UI as "お題"
+- **Scoring**: Shooting the correct (target) hiragana = 10 pts; wrong hiragana = 0 pts
+- **Lives**: Start with 3; lose one when any hiragana reaches the bottom
+- **Enemy spawn**: Every 1000ms; 30% chance of target hiragana, 70% random from 46 hiragana
+- **Speech**: Target is re-spoken every 5 seconds; click "お題" display to replay manually
 - **Collision**: AABB (Axis-Aligned Bounding Box)
 
 ## Code Conventions

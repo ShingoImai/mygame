@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>シューティングゲーム</title>
+    <title>ひらがなシューティング</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
     <style>
         /* グローバルなスタイル設定 */
@@ -112,6 +112,7 @@
     <div class="game-container">
         <div class="ui-panel">
             <div id="scoreDisplay">スコア: 0</div>
+            <div id="targetDisplay" style="color: #f6e05e; cursor: pointer;" title="クリックでもう一度聞く">🔊 お題: ?</div>
             <div id="lifeDisplay">ライフ: 3</div>
         </div>
         <canvas id="gameCanvas"></canvas>
@@ -132,21 +133,33 @@
         const messageBox = document.getElementById('messageBox');
         const messageText = document.getElementById('messageText');
         const startButton = document.getElementById('startButton');
+        const targetDisplay = document.getElementById('targetDisplay');
 
         // ゲーム定数と変数
         const PLAYER_SIZE = 40; // プレイヤーのサイズ
         const BULLET_SIZE = 10; // 弾のサイズ (単一サイズ)
         const BULLET_SPEED = 7; // 弾の速度
 
-        const ENEMY_SIZE_LARGE = 40; // 大きい敵のサイズ
-        const ENEMY_SIZE_SMALL = 20; // 小さい敵のサイズ
+        const ENEMY_SIZE = 40; // ひらがなのフォントサイズ
         const ENEMY_SPEED_MIN = 1; // 敵の最小速度
         const ENEMY_SPEED_MAX = 3; // 敵の最大速度
         const ENEMY_SPAWN_INTERVAL = 1000; // 敵の出現間隔（ミリ秒）
         const INITIAL_LIVES = 3; // 初期ライフ数
+        const POINTS_CORRECT = 10; // 正解のひらがなを撃ったときのポイント
 
-        const POINTS_LARGE_ENEMY = 10; // 大きい敵を倒したときのポイント
-        const POINTS_SMALL_ENEMY = 30; // 小さい敵を倒したときのポイント (高く設定)
+        // ひらがなの配列
+        const HIRAGANA = [
+            'あ', 'い', 'う', 'え', 'お',
+            'か', 'き', 'く', 'け', 'こ',
+            'さ', 'し', 'す', 'せ', 'そ',
+            'た', 'ち', 'つ', 'て', 'と',
+            'な', 'に', 'ぬ', 'ね', 'の',
+            'は', 'ひ', 'ふ', 'へ', 'ほ',
+            'ま', 'み', 'む', 'め', 'も',
+            'や', 'ゆ', 'よ',
+            'ら', 'り', 'る', 'れ', 'ろ',
+            'わ', 'を', 'ん'
+        ];
 
         let player = {
             x: canvas.width / 2, // プレイヤーのX座標
@@ -161,6 +174,8 @@
         let lastEnemySpawnTime = 0; // 最後に敵が出現した時間
         let gameRunning = false; // ゲームが実行中かどうか
         let animationFrameId; // requestAnimationFrameのID
+        let targetHiragana = ''; // 現在のターゲットひらがな
+        let speakIntervalId; // ターゲット音声の定期再生用
 
         // Tone.jsのサウンド設定
         // 弾の発射音
@@ -243,6 +258,24 @@
         bgmPart.loop = true; // ループ再生
         bgmPart.loopEnd = '1m'; // 1小節でループ
 
+        // 音声合成でひらがなを読み上げる
+        function speakHiragana(char) {
+            if ('speechSynthesis' in window) {
+                speechSynthesis.cancel(); // 前の発話をキャンセル
+                const utterance = new SpeechSynthesisUtterance(char);
+                utterance.lang = 'ja-JP';
+                utterance.rate = 0.8;
+                speechSynthesis.speak(utterance);
+            }
+        }
+
+        // 新しいターゲットひらがなを選択
+        function selectNewTarget() {
+            targetHiragana = HIRAGANA[Math.floor(Math.random() * HIRAGANA.length)];
+            speakHiragana(targetHiragana);
+            updateUI();
+        }
+
         // キャンバスのリサイズ関数
         function resizeCanvas() {
             canvas.width = window.innerWidth * 0.8 > 800 ? 800 : window.innerWidth * 0.8; // 最大幅800px、ビューポート幅の80%
@@ -264,6 +297,7 @@
         function updateUI() {
             scoreDisplay.textContent = `スコア: ${score}`;
             lifeDisplay.textContent = `ライフ: ${lives}`;
+            targetDisplay.textContent = `🔊 お題: ${targetHiragana || '?'}`;
         }
 
         // プレイヤー（大砲）の描画をよりリアルに
@@ -309,33 +343,19 @@
             ctx.fillRect(bullet.x - bullet.size / 2, bullet.y - bullet.size / 2, bullet.size, bullet.size);
         }
 
-        // 敵の描画 (アメーバのような形状と回転)
+        // 敵（ひらがな）の描画
         function drawEnemy(enemy) {
-            if (enemy.type === 'large') {
-                ctx.fillStyle = '#f56565'; // 大きい敵の色（赤）
-            } else { // 'small'
-                ctx.fillStyle = '#9f7aea'; // 小さい敵の色（紫）
-            }
+            ctx.save();
+            ctx.translate(enemy.x, enemy.y);
 
-            ctx.save(); // 現在の描画状態を保存
-            ctx.translate(enemy.x, enemy.y); // 原点を敵の中心に移動
-            ctx.rotate(enemy.rotation); // 敵の回転を適用
+            // ひらがなの描画
+            ctx.fillStyle = '#e2e8f0'; // 明るい色
+            ctx.font = `bold ${enemy.size}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(enemy.char, 0, 0);
 
-            // アメーバのような形状を描画
-            const halfSize = enemy.size / 2;
-            const controlPointOffset = halfSize * 0.7; // 制御点のオフセットを調整
-
-            ctx.beginPath();
-            // 複数の二次ベジェ曲線で有機的な形状を作成
-            ctx.moveTo(halfSize, 0);
-            ctx.quadraticCurveTo(halfSize, controlPointOffset, controlPointOffset / 2, halfSize);
-            ctx.quadraticCurveTo(-controlPointOffset / 2, halfSize, -halfSize, halfSize / 2);
-            ctx.quadraticCurveTo(-halfSize, -controlPointOffset, -controlPointOffset / 2, -halfSize);
-            ctx.quadraticCurveTo(controlPointOffset / 2, -halfSize, halfSize, 0);
-            ctx.closePath();
-            ctx.fill();
-
-            ctx.restore(); // 以前の描画状態を復元
+            ctx.restore();
         }
 
         // 弾の更新（移動）
@@ -366,36 +386,27 @@
             }
         }
 
-        // 敵の生成
+        // 敵（ひらがな）の生成
         function spawnEnemy() {
-            const isSmall = Math.random() < 0.5; // 50%の確率で小さい敵
-            let enemySize;
-            let enemyPoints;
-            let enemyType;
-
-            if (isSmall) {
-                enemySize = ENEMY_SIZE_SMALL;
-                enemyPoints = POINTS_SMALL_ENEMY;
-                enemyType = 'small';
+            // 30%の確率でターゲットのひらがなを出現させる
+            let char;
+            if (Math.random() < 0.3 && targetHiragana) {
+                char = targetHiragana;
             } else {
-                enemySize = ENEMY_SIZE_LARGE;
-                enemyPoints = POINTS_LARGE_ENEMY;
-                enemyType = 'large';
+                char = HIRAGANA[Math.floor(Math.random() * HIRAGANA.length)];
             }
 
-            const x = Math.random() * (canvas.width - enemySize) + enemySize / 2; // ランダムなX座標
+            const x = Math.random() * (canvas.width - ENEMY_SIZE) + ENEMY_SIZE / 2; // ランダムなX座標
             const speed = Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN) + ENEMY_SPEED_MIN; // ランダムな速度
-            const rotationSpeed = (Math.random() - 0.5) * 0.05; // -0.025から0.025の間のランダムな回転速度
 
             enemies.push({
                 x: x,
-                y: -enemySize / 2, // 画面上部から出現
-                size: enemySize,
+                y: -ENEMY_SIZE / 2, // 画面上部から出現
+                size: ENEMY_SIZE,
                 speed: speed,
-                points: enemyPoints,
-                type: enemyType,
-                rotation: 0, // 初期回転角度
-                rotationSpeed: rotationSpeed // 回転速度
+                char: char,
+                rotation: 0,
+                rotationSpeed: 0
             });
         }
 
@@ -408,21 +419,21 @@
                    obj1.y + obj1.height > obj2.y;
         }
 
-        // 弾と敵の衝突判定
+        // 弾とひらがなの衝突判定
         function handleCollisions() {
             for (let i = bullets.length - 1; i >= 0; i--) {
                 for (let j = enemies.length - 1; j >= 0; j--) {
                     const bullet = bullets[i];
                     const enemy = enemies[j];
 
-                    // 弾の当たり判定ボックス (正方形)
+                    // 弾の当たり判定ボックス
                     const bulletRect = {
                         x: bullet.x - bullet.size / 2,
                         y: bullet.y - bullet.size / 2,
                         width: bullet.size,
                         height: bullet.size
                     };
-                    // 敵の当たり判定ボックス (正方形, 円のバウンディングボックスとして)
+                    // ひらがなの当たり判定ボックス
                     const enemyRect = {
                         x: enemy.x - enemy.size / 2,
                         y: enemy.y - enemy.size / 2,
@@ -432,15 +443,17 @@
 
                     if (checkCollision(bulletRect, enemyRect)) {
                         bullets.splice(i, 1); // 弾を削除
-                        enemies.splice(j, 1); // 敵を削除
-                        score += enemy.points; // 敵のタイプに応じたポイントを加算
-                        updateUI(); // UI更新
+                        enemies.splice(j, 1); // ひらがなを削除
 
-                        // 敵のタイプに応じて異なるヒット音を再生
-                        if (enemy.type === 'large') {
+                        if (enemy.char === targetHiragana) {
+                            // 正解！ポイント加算して新しいターゲットを選択
+                            score += POINTS_CORRECT;
                             largeEnemyHitSynth.triggerAttackRelease('C4', '8n');
-                        } else { // 'small'
-                            smallEnemyHitSynth.triggerAttackRelease('E5', '16n'); // 小さい敵は少し高めの音
+                            updateUI();
+                            selectNewTarget();
+                        } else {
+                            // 不正解
+                            smallEnemyHitSynth.triggerAttackRelease('E3', '16n');
                         }
                         break; // 弾が当たったら次の弾へ
                     }
@@ -496,6 +509,17 @@
             if (!bgmPart.state || bgmPart.state !== 'started') {
                 bgmPart.start();
             }
+
+            // ターゲットひらがなを選択して音声を再生
+            selectNewTarget();
+
+            // 定期的にターゲットの音声を再生（5秒ごと）
+            clearInterval(speakIntervalId);
+            speakIntervalId = setInterval(() => {
+                if (gameRunning && targetHiragana) {
+                    speakHiragana(targetHiragana);
+                }
+            }, 5000);
         }
 
         // ゲームオーバー
@@ -508,6 +532,12 @@
 
             // BGMを停止
             bgmPart.stop();
+
+            // 音声再生を停止
+            clearInterval(speakIntervalId);
+            if ('speechSynthesis' in window) {
+                speechSynthesis.cancel();
+            }
         }
 
         // 弾の発射関数
@@ -568,13 +598,20 @@
             startGame();
         });
 
+        // ターゲットの音声をもう一度聞く
+        targetDisplay.addEventListener('click', () => {
+            if (gameRunning && targetHiragana) {
+                speakHiragana(targetHiragana);
+            }
+        });
+
         // 「発射」ボタンの関連コードは削除済みのため、このリスナーは不要になりました。
         // fireButton.addEventListener('click', () => {
         //     fireBullet();
         // });
 
         // 初期メッセージ表示
-        messageText.textContent = 'ゲームを始めるには「スタート」を押してください！';
+        messageText.textContent = '音を聞いて正しいひらがなを撃とう！';
         messageBox.style.display = 'block';
     </script>
 </body>
