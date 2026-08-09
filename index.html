@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ひらがなシューティング</title>
+    <title>Hiragana Shooting</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
     <style>
         /* グローバルなスタイル設定 */
@@ -15,7 +15,10 @@
             justify-content: center;
             align-items: center;
             min-height: 100vh;
-            background-color: #1a202c; /* ダークな背景色 */
+            background:
+                radial-gradient(circle at 18% 22%, rgba(93, 57, 180, 0.24), transparent 35%),
+                radial-gradient(circle at 82% 72%, rgba(20, 160, 190, 0.16), transparent 32%),
+                #050814;
             color: #e2e8f0; /* 明るい文字色 */
             flex-direction: column;
             padding: 10px;
@@ -40,7 +43,10 @@
         /* キャンバスのスタイル */
         canvas {
             display: block;
-            background-color: #000000; /* ゲームの背景を黒にする */
+            background:
+                radial-gradient(circle at 20% 30%, rgba(95, 45, 180, 0.2), transparent 42%),
+                radial-gradient(circle at 80% 70%, rgba(20, 160, 190, 0.13), transparent 40%),
+                #020617;
             touch-action: none; /* タッチイベントのデフォルト動作を無効にする */
         }
 
@@ -99,6 +105,10 @@
             box-shadow: 0 2px #2e8b57;
         }
 
+        #messageText {
+            white-space: pre-line;
+        }
+
         /* スコアとライフの表示 */
         #scoreDisplay, #lifeDisplay {
             color: #63b3ed; /* 明るい青 */
@@ -106,19 +116,44 @@
         #lifeDisplay {
             color: #f56565; /* 赤 */
         }
+
+        #audioStatus {
+            min-height: 1.4em;
+            padding: 6px 12px;
+            color: #fbd38d;
+            font-size: 0.9em;
+            text-align: center;
+        }
+
+        @media (max-width: 480px) {
+            .ui-panel {
+                gap: 4px;
+                padding: 10px 8px;
+                font-size: 0.85em;
+                white-space: nowrap;
+            }
+
+            .message-box {
+                width: calc(100% - 32px);
+                padding: 22px 16px;
+                box-sizing: border-box;
+                font-size: 1.2em;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="game-container">
         <div class="ui-panel">
-            <div id="scoreDisplay">スコア: 0</div>
-            <div id="targetDisplay" style="color: #f6e05e; cursor: pointer;" title="クリックでもう一度聞く">🔊 お題: ?</div>
-            <div id="lifeDisplay">ライフ: 3</div>
+            <div id="scoreDisplay">Score: 0</div>
+            <div id="targetDisplay" style="color: #f6e05e; cursor: pointer;" title="Click to hear it again">🔊 Target: ?</div>
+            <div id="lifeDisplay">Lives: 3</div>
         </div>
+        <div id="audioStatus" role="status" aria-live="polite"></div>
         <canvas id="gameCanvas"></canvas>
         <div id="messageBox" class="message-box">
             <div id="messageText"></div>
-            <button id="startButton">スタート</button>
+            <button id="startButton">Start</button>
         </div>
         <!-- 「発射」ボタンのコントロールパネルを削除しました -->
     </div>
@@ -134,16 +169,21 @@
         const messageText = document.getElementById('messageText');
         const startButton = document.getElementById('startButton');
         const targetDisplay = document.getElementById('targetDisplay');
+        const audioStatus = document.getElementById('audioStatus');
 
         // ゲーム定数と変数
         const PLAYER_SIZE = 40; // プレイヤーのサイズ
+        const PLAYER_SPRITE_WIDTH = 64.4;
+        const PLAYER_SPRITE_HEIGHT = 64.4;
         const BULLET_SIZE = 10; // 弾のサイズ (単一サイズ)
         const BULLET_SPEED = 7; // 弾の速度
 
         const ENEMY_SIZE = 40; // ひらがなのフォントサイズ
-        const ENEMY_SPEED_MIN = 1; // 敵の最小速度
-        const ENEMY_SPEED_MAX = 3; // 敵の最大速度
-        const ENEMY_SPAWN_INTERVAL = 1000; // 敵の出現間隔（ミリ秒）
+        const ENEMY_SPEED_MIN = 0.7; // 敵の最小速度（従来より30%低速）
+        const ENEMY_SPEED_MAX = 2.1; // 敵の最大速度（従来より30%低速）
+        const ENEMY_SPAWN_INTERVAL = 1400; // 敵の出現間隔（従来より約30%ゆっくり）
+        const MIN_VISIBLE_ENEMIES = 3; // 正解1文字と不正解候補2文字を常に表示
+        const MAX_VISIBLE_ENEMIES = 5; // 文字が増えすぎないように制限
         const INITIAL_LIVES = 3; // 初期ライフ数
         const POINTS_CORRECT = 10; // 正解のひらがなを撃ったときのポイント
 
@@ -161,6 +201,20 @@
             'わ', 'を', 'ん'
         ];
 
+        // Target欄に表示するヘボン式ローマ字
+        const HIRAGANA_ROMAJI = {
+            'あ': 'a', 'い': 'i', 'う': 'u', 'え': 'e', 'お': 'o',
+            'か': 'ka', 'き': 'ki', 'く': 'ku', 'け': 'ke', 'こ': 'ko',
+            'さ': 'sa', 'し': 'shi', 'す': 'su', 'せ': 'se', 'そ': 'so',
+            'た': 'ta', 'ち': 'chi', 'つ': 'tsu', 'て': 'te', 'と': 'to',
+            'な': 'na', 'に': 'ni', 'ぬ': 'nu', 'ね': 'ne', 'の': 'no',
+            'は': 'ha', 'ひ': 'hi', 'ふ': 'fu', 'へ': 'he', 'ほ': 'ho',
+            'ま': 'ma', 'み': 'mi', 'む': 'mu', 'め': 'me', 'も': 'mo',
+            'や': 'ya', 'ゆ': 'yu', 'よ': 'yo',
+            'ら': 'ra', 'り': 'ri', 'る': 'ru', 'れ': 're', 'ろ': 'ro',
+            'わ': 'wa', 'を': 'wo', 'ん': 'n'
+        };
+
         let player = {
             x: canvas.width / 2, // プレイヤーのX座標
             y: canvas.height - PLAYER_SIZE * 2, // プレイヤーのY座標
@@ -169,6 +223,14 @@
         };
         let bullets = []; // 弾の配列
         let enemies = []; // 敵の配列
+        let explosions = []; // 正解命中時の爆発エフェクト
+        let stars = [];
+        let backgroundBattleship = null;
+        let nextBattleshipAt = Infinity;
+        let backgroundBattleshipPassCount = 0;
+        const PLAYER_REFLECTION_DURATION = 900;
+        let playerReflectionStartedAt = -Infinity;
+        let playerReflectionSourceX = 0;
         let score = 0; // スコア
         let lives = INITIAL_LIVES; // ライフ
         let lastEnemySpawnTime = 0; // 最後に敵が出現した時間
@@ -176,10 +238,26 @@
         let animationFrameId; // requestAnimationFrameのID
         let targetHiragana = ''; // 現在のターゲットひらがな
         let speakIntervalId; // ターゲット音声の定期再生用
+        let japaneseVoice = null; // 読み上げに使う日本語音声
+        let speechRetryCount = 0;
+        let speechSequenceId = 0; // 古い読み上げシーケンスを停止するためのID
+        let targetReadyForEnemies = false; // 2回の読み上げ完了後に敵を出現させる
+        let currentRoundId = 0; // 古いお題の復旧処理を無効にするためのID
+        let roundRecoveryTimeoutId;
+        let roundSpeechStarts = new Set(); // 1回目・2回目の音声開始を記録
+        let roundSpeechAttempts = 0;
+
+        const playerSprite = new Image();
+        playerSprite.src = 'assets/player-spaceship-256.png';
+        const backgroundBattleshipSprite = new Image();
+        backgroundBattleshipSprite.src = 'assets/yamato-battleship-sprite.png';
+
+        const toneAvailable = typeof window.Tone !== 'undefined';
+        const silentSynth = { triggerAttackRelease() {} };
 
         // Tone.jsのサウンド設定
         // 弾の発射音
-        const bulletSynth = new Tone.PolySynth(Tone.Synth, {
+        const bulletSynth = toneAvailable ? new Tone.PolySynth(Tone.Synth, {
             oscillator: {
                 type: 'triangle'
             },
@@ -189,10 +267,10 @@
                 sustain: 0.05,
                 release: 0.1
             }
-        }).toDestination();
+        }).toDestination() : silentSynth;
 
         // 大きい敵が破壊された音
-        const largeEnemyHitSynth = new Tone.PolySynth(Tone.Synth, {
+        const largeEnemyHitSynth = toneAvailable ? new Tone.PolySynth(Tone.Synth, {
             oscillator: {
                 type: 'sine'
             },
@@ -202,10 +280,10 @@
                 sustain: 0.05,
                 release: 0.3
             }
-        }).toDestination();
+        }).toDestination() : silentSynth;
 
         // 小さい敵が破壊された音
-        const smallEnemyHitSynth = new Tone.PolySynth(Tone.Synth, {
+        const smallEnemyHitSynth = toneAvailable ? new Tone.PolySynth(Tone.Synth, {
             oscillator: {
                 type: 'square'
             },
@@ -216,10 +294,10 @@
                 release: 0.2
             },
             volume: -5 // 少し高めの音量で区別しやすく
-        }).toDestination();
+        }).toDestination() : silentSynth;
 
         // ゲームオーバー音
-        const gameOverSynth = new Tone.PolySynth(Tone.Synth, {
+        const gameOverSynth = toneAvailable ? new Tone.PolySynth(Tone.Synth, {
             oscillator: {
                 type: 'square'
             },
@@ -229,10 +307,10 @@
                 sustain: 0.1,
                 release: 1
             }
-        }).toDestination();
+        }).toDestination() : silentSynth;
 
         // BGMシンセサイザーとエフェクト
-        const bgmSynth = new Tone.PolySynth(Tone.AMSynth, {
+        const bgmSynth = toneAvailable ? new Tone.PolySynth(Tone.AMSynth, {
             oscillator: {
                 type: 'sine'
             },
@@ -243,37 +321,802 @@
                 release: 4
             },
             volume: -15 // BGMの音量を調整
-        }).chain(new Tone.Reverb(2).toDestination()); // リバーブをかけて空間感を出す
+        }).chain(new Tone.Reverb(2).toDestination()) : silentSynth; // リバーブをかけて空間感を出す
 
         // BGMのパターン (ゆっくりとした和音)
-        const bgmPart = new Tone.Part((time, chord) => {
+        const bgmPart = toneAvailable ? new Tone.Part((time, chord) => {
             bgmSynth.triggerAttackRelease(chord, '8n', time);
         }, [
             ['0:0:0', ['C3', 'G3', 'C4']],
             ['0:1:0', ['Bb2', 'F3', 'Bb3']],
             ['0:2:0', ['Ab2', 'Eb3', 'Ab3']],
             ['0:3:0', ['G2', 'D3', 'G3']]
-        ]);
+        ]) : { state: 'stopped', start() {}, stop() {} };
 
         bgmPart.loop = true; // ループ再生
         bgmPart.loopEnd = '1m'; // 1小節でループ
 
-        // 音声合成でひらがなを読み上げる
-        function speakHiragana(char) {
-            if ('speechSynthesis' in window) {
-                speechSynthesis.cancel(); // 前の発話をキャンセル
-                const utterance = new SpeechSynthesisUtterance(char);
-                utterance.lang = 'ja-JP';
-                utterance.rate = 0.8;
-                speechSynthesis.speak(utterance);
+        // Web Audioで、レーザー発射音・爆発音・宇宙空間風BGMを生成する。
+        let gameAudioContext = null;
+        let spaceBgmMaster = null;
+        let spaceBgmTimerId = null;
+        let spaceBgmNodes = [];
+        let spaceChimeIndex = 0;
+        let spacePadOscillators = [];
+        const BGM_FULL_VOLUME = 0.35;
+        const BGM_DUCKED_VOLUME = 0.075;
+
+        async function prepareGameAudio() {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) return null;
+            if (!gameAudioContext) gameAudioContext = new AudioContextClass();
+            if (gameAudioContext.state === 'suspended') await gameAudioContext.resume();
+            return gameAudioContext;
+        }
+
+        function playLaserSound() {
+            const audioContext = gameAudioContext;
+            if (!audioContext || audioContext.state !== 'running') return;
+            const now = audioContext.currentTime;
+            const oscillator = audioContext.createOscillator();
+            const filter = audioContext.createBiquadFilter();
+            const gain = audioContext.createGain();
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(1500, now);
+            oscillator.frequency.exponentialRampToValueAtTime(110, now + 0.16);
+            filter.type = 'bandpass';
+            filter.frequency.setValueAtTime(1800, now);
+            filter.Q.value = 2.5;
+            gain.gain.setValueAtTime(0.16, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+            oscillator.connect(filter).connect(gain).connect(audioContext.destination);
+            oscillator.start(now);
+            oscillator.stop(now + 0.2);
+        }
+
+        function playExplosionSound() {
+            const audioContext = gameAudioContext;
+            if (!audioContext || audioContext.state !== 'running') return;
+            const now = audioContext.currentTime;
+            const duration = 1.15;
+            const compressor = audioContext.createDynamicsCompressor();
+            compressor.threshold.value = -16;
+            compressor.knee.value = 8;
+            compressor.ratio.value = 7;
+            compressor.attack.value = 0.002;
+            compressor.release.value = 0.3;
+            compressor.connect(audioContext.destination);
+
+            // 爆発の胴鳴りになる、低く濁ったノイズ。
+            const buffer = audioContext.createBuffer(1, Math.ceil(audioContext.sampleRate * duration), audioContext.sampleRate);
+            const samples = buffer.getChannelData(0);
+            for (let i = 0; i < samples.length; i++) {
+                const decay = Math.pow(1 - i / samples.length, 1.7);
+                samples[i] = (Math.random() * 2 - 1) * decay;
             }
+            const noise = audioContext.createBufferSource();
+            const noiseFilter = audioContext.createBiquadFilter();
+            const noiseGain = audioContext.createGain();
+            noise.buffer = buffer;
+            noiseFilter.type = 'lowpass';
+            noiseFilter.frequency.setValueAtTime(1900, now);
+            noiseFilter.frequency.exponentialRampToValueAtTime(75, now + duration);
+            noiseFilter.Q.value = 1.4;
+            noiseGain.gain.setValueAtTime(0.48, now);
+            noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            noise.connect(noiseFilter).connect(noiseGain).connect(compressor);
+
+            // 最初の瞬間に鋭い破裂音を重ねる。
+            const crack = audioContext.createBufferSource();
+            const crackFilter = audioContext.createBiquadFilter();
+            const crackGain = audioContext.createGain();
+            crack.buffer = buffer;
+            crackFilter.type = 'highpass';
+            crackFilter.frequency.value = 1200;
+            crackGain.gain.setValueAtTime(0.72, now);
+            crackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
+            crack.connect(crackFilter).connect(crackGain).connect(compressor);
+
+            // 2つの低音をずらして、腹に響く「ドン」を作る。
+            const boom = audioContext.createOscillator();
+            const boomGain = audioContext.createGain();
+            boom.type = 'sine';
+            boom.frequency.setValueAtTime(145, now);
+            boom.frequency.exponentialRampToValueAtTime(34, now + 0.72);
+            boomGain.gain.setValueAtTime(0.42, now);
+            boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.82);
+            boom.connect(boomGain).connect(compressor);
+
+            const subBoom = audioContext.createOscillator();
+            const subBoomGain = audioContext.createGain();
+            subBoom.type = 'triangle';
+            subBoom.frequency.setValueAtTime(72, now + 0.025);
+            subBoom.frequency.exponentialRampToValueAtTime(25, now + 0.9);
+            subBoomGain.gain.setValueAtTime(0.001, now);
+            subBoomGain.gain.linearRampToValueAtTime(0.26, now + 0.025);
+            subBoomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.95);
+            subBoom.connect(subBoomGain).connect(compressor);
+
+            // 小さな破裂を散らし、装甲片が飛ぶ感じを加える。
+            [0.11, 0.19, 0.31, 0.43].forEach((delay, index) => {
+                const debris = audioContext.createBufferSource();
+                const debrisFilter = audioContext.createBiquadFilter();
+                const debrisGain = audioContext.createGain();
+                debris.buffer = buffer;
+                debrisFilter.type = 'bandpass';
+                debrisFilter.frequency.value = 850 + index * 420;
+                debrisFilter.Q.value = 2.8;
+                debrisGain.gain.setValueAtTime(0.001, now);
+                debrisGain.gain.setValueAtTime(0.14 - index * 0.018, now + delay);
+                debrisGain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.08);
+                debris.connect(debrisFilter).connect(debrisGain).connect(compressor);
+                debris.start(now + delay, index * 0.035);
+            });
+
+            noise.start(now);
+            crack.start(now);
+            boom.start(now);
+            subBoom.start(now);
+            boom.stop(now + 0.84);
+            subBoom.stop(now + 0.98);
+            setTimeout(() => compressor.disconnect(), 1700);
+        }
+
+        function playOrchestralTone(frequency, options = {}) {
+            if (!gameAudioContext || !spaceBgmMaster || !frequency) return;
+            const now = gameAudioContext.currentTime + (options.delay || 0);
+            const duration = options.duration || 0.4;
+            const oscillator = gameAudioContext.createOscillator();
+            const filter = gameAudioContext.createBiquadFilter();
+            const gain = gameAudioContext.createGain();
+            oscillator.type = options.type || 'triangle';
+            oscillator.frequency.value = frequency;
+            oscillator.detune.value = options.detune || 0;
+            filter.type = 'lowpass';
+            filter.frequency.value = options.filter || 1800;
+            filter.Q.value = options.q || 0.8;
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.exponentialRampToValueAtTime(options.volume || 0.05, now + (options.attack || 0.018));
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+            oscillator.connect(filter).connect(gain).connect(spaceBgmMaster);
+            oscillator.start(now);
+            oscillator.stop(now + duration + 0.03);
+        }
+
+        function playMarchKick() {
+            if (!gameAudioContext || !spaceBgmMaster) return;
+            const now = gameAudioContext.currentTime;
+            const oscillator = gameAudioContext.createOscillator();
+            const gain = gameAudioContext.createGain();
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(105, now);
+            oscillator.frequency.exponentialRampToValueAtTime(42, now + 0.18);
+            gain.gain.setValueAtTime(0.16, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+            oscillator.connect(gain).connect(spaceBgmMaster);
+            oscillator.start(now);
+            oscillator.stop(now + 0.26);
+        }
+
+        function playMarchSnare(accent = false) {
+            if (!gameAudioContext || !spaceBgmMaster) return;
+            const now = gameAudioContext.currentTime;
+            const duration = accent ? 0.22 : 0.13;
+            const buffer = gameAudioContext.createBuffer(1, Math.ceil(gameAudioContext.sampleRate * duration), gameAudioContext.sampleRate);
+            const samples = buffer.getChannelData(0);
+            for (let i = 0; i < samples.length; i++) {
+                samples[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / samples.length, 1.8);
+            }
+            const source = gameAudioContext.createBufferSource();
+            const filter = gameAudioContext.createBiquadFilter();
+            const gain = gameAudioContext.createGain();
+            source.buffer = buffer;
+            filter.type = 'bandpass';
+            filter.frequency.value = accent ? 1900 : 1450;
+            filter.Q.value = 0.7;
+            gain.gain.setValueAtTime(accent ? 0.11 : 0.08, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+            source.connect(filter).connect(gain).connect(spaceBgmMaster);
+            source.start(now);
+        }
+
+        function playOrchestralCrash() {
+            if (!gameAudioContext || !spaceBgmMaster) return;
+            const now = gameAudioContext.currentTime;
+            const duration = 1.45;
+            const buffer = gameAudioContext.createBuffer(1, Math.ceil(gameAudioContext.sampleRate * duration), gameAudioContext.sampleRate);
+            const samples = buffer.getChannelData(0);
+            for (let i = 0; i < samples.length; i++) {
+                const decay = Math.pow(1 - i / samples.length, 2.2);
+                samples[i] = (Math.random() * 2 - 1) * decay;
+            }
+            const source = gameAudioContext.createBufferSource();
+            const highpass = gameAudioContext.createBiquadFilter();
+            const gain = gameAudioContext.createGain();
+            source.buffer = buffer;
+            highpass.type = 'highpass';
+            highpass.frequency.value = 2600;
+            gain.gain.setValueAtTime(0.065, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+            source.connect(highpass).connect(gain).connect(spaceBgmMaster);
+            source.start(now);
+        }
+
+        function playSpaceChime() {
+            if (!gameRunning || !gameAudioContext || !spaceBgmMaster) return;
+            const step = spaceChimeIndex++ % 48;
+            const stringOstinato = [
+                130.81, 196, 155.56, 196, 130.81, 207.65, 155.56, 196,
+                103.83, 155.56, 130.81, 155.56, 103.83, 174.61, 130.81, 155.56,
+                116.54, 174.61, 138.59, 174.61, 116.54, 196, 138.59, 174.61,
+                98, 146.83, 116.54, 146.83, 98, 164.81, 116.54, 146.83,
+                103.83, 155.56, 130.81, 155.56, 103.83, 174.61, 130.81, 155.56,
+                98, 146.83, 123.47, 146.83, 98, 155.56, 116.54, 146.83
+            ];
+            const brassMotif = [
+                261.63, 0, 261.63, 311.13, 0, 293.66, 0, 233.08,
+                207.65, 0, 233.08, 0, 261.63, 0, 196, 0,
+                233.08, 0, 233.08, 293.66, 0, 261.63, 0, 207.65,
+                196, 0, 207.65, 0, 233.08, 0, 174.61, 0,
+                261.63, 0, 311.13, 0, 349.23, 0, 311.13, 0,
+                293.66, 0, 261.63, 0, 246.94, 0, 196, 0
+            ];
+            const chords = [
+                [65.41, 77.78, 98],
+                [51.91, 65.41, 77.78],
+                [58.27, 69.3, 87.31],
+                [49, 61.74, 73.42],
+                [51.91, 65.41, 77.78],
+                [49, 61.74, 77.78]
+            ];
+
+            playOrchestralTone(stringOstinato[step], {
+                type: step % 2 === 0 ? 'sawtooth' : 'triangle',
+                volume: step % 4 === 0 ? 0.045 : 0.032,
+                duration: 0.21,
+                attack: 0.009,
+                filter: 1250
+            });
+
+            const brassNote = brassMotif[step];
+            if (brassNote) {
+                const accented = step % 8 === 0 || step % 8 === 3;
+                playOrchestralTone(brassNote, { type: 'sawtooth', volume: accented ? 0.067 : 0.055, duration: accented ? 0.58 : 0.4, attack: 0.024, filter: 1050 });
+                playOrchestralTone(brassNote / 2, { type: 'square', volume: 0.032, duration: 0.52, attack: 0.028, filter: 720, detune: -6 });
+                if (accented) {
+                    playOrchestralTone(brassNote * 1.5, { type: 'triangle', volume: 0.021, duration: 0.48, attack: 0.035, filter: 1450, detune: 4 });
+                }
+            }
+
+            if (step % 8 === 0) {
+                const chord = chords[Math.floor(step / 8) % chords.length];
+                chord.forEach((frequency, index) => {
+                    playOrchestralTone(frequency, {
+                        type: index === 0 ? 'sawtooth' : 'triangle',
+                        volume: index === 0 ? 0.04 : 0.025,
+                        duration: 1.9,
+                        attack: 0.075,
+                        filter: 720 + index * 160,
+                        detune: index * 3
+                    });
+                });
+            }
+
+            if (step % 4 === 0) playMarchKick();
+            if (step % 4 === 2) playMarchSnare(step % 8 === 6);
+            if (step % 8 === 3 || step % 8 === 7) playMarchSnare(false);
+            if (step === 0 || step === 32) playOrchestralCrash();
+        }
+
+        function startSpaceBgm() {
+            const audioContext = gameAudioContext;
+            if (!audioContext || spaceBgmMaster) return;
+            const now = audioContext.currentTime;
+            spaceBgmMaster = audioContext.createGain();
+            spaceBgmMaster.gain.setValueAtTime(0.0001, now);
+            spaceBgmMaster.gain.exponentialRampToValueAtTime(BGM_FULL_VOLUME, now + 0.7);
+
+            const bgmCompressor = audioContext.createDynamicsCompressor();
+            bgmCompressor.threshold.value = -18;
+            bgmCompressor.knee.value = 12;
+            bgmCompressor.ratio.value = 5;
+            bgmCompressor.attack.value = 0.006;
+            bgmCompressor.release.value = 0.28;
+            spaceBgmMaster.connect(bgmCompressor).connect(audioContext.destination);
+
+            const delay = audioContext.createDelay(1);
+            const feedback = audioContext.createGain();
+            const wetGain = audioContext.createGain();
+            delay.delayTime.value = 0.16;
+            feedback.gain.value = 0.16;
+            wetGain.gain.value = 0.2;
+            spaceBgmMaster.connect(delay);
+            delay.connect(feedback).connect(delay);
+            delay.connect(wetGain).connect(bgmCompressor);
+            spaceBgmNodes.push(delay, feedback, wetGain, bgmCompressor);
+
+            spacePadOscillators = [];
+            spaceChimeIndex = 0;
+            playSpaceChime();
+            spaceBgmTimerId = setInterval(playSpaceChime, 250);
+            canvas.dataset.bgm = 'playing';
+            canvas.dataset.bgmStyle = 'original-1970s-tragic-space-orchestral-march';
+            canvas.dataset.bgmVolume = String(BGM_FULL_VOLUME);
+            canvas.dataset.bgmMix = 'audible-compressed';
+        }
+
+        function setSpaceBgmDucked(ducked) {
+            if (!gameAudioContext || !spaceBgmMaster) return;
+            const now = gameAudioContext.currentTime;
+            const targetVolume = ducked ? BGM_DUCKED_VOLUME : BGM_FULL_VOLUME;
+            spaceBgmMaster.gain.cancelScheduledValues(now);
+            spaceBgmMaster.gain.setValueAtTime(Math.max(spaceBgmMaster.gain.value, 0.0001), now);
+            spaceBgmMaster.gain.exponentialRampToValueAtTime(targetVolume, now + (ducked ? 0.08 : 0.32));
+            canvas.dataset.bgmDucked = ducked ? 'true' : 'false';
+        }
+
+        function stopSpaceBgm() {
+            clearInterval(spaceBgmTimerId);
+            spaceBgmTimerId = null;
+            canvas.dataset.bgm = 'stopped';
+            if (!gameAudioContext || !spaceBgmMaster) return;
+            const now = gameAudioContext.currentTime;
+            spaceBgmMaster.gain.cancelScheduledValues(now);
+            spaceBgmMaster.gain.setValueAtTime(Math.max(spaceBgmMaster.gain.value, 0.0001), now);
+            spaceBgmMaster.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
+            spaceBgmNodes.forEach(node => {
+                if (typeof node.stop === 'function') {
+                    try { node.stop(now + 0.65); } catch (error) {}
+                }
+            });
+            const oldMaster = spaceBgmMaster;
+            setTimeout(() => oldMaster.disconnect(), 800);
+            spaceBgmNodes = [];
+            spacePadOscillators = [];
+            spaceBgmMaster = null;
+        }
+
+        // 音声合成でひらがなを読み上げる
+        function findJapaneseVoice() {
+            if (!('speechSynthesis' in window)) return null;
+            const voices = speechSynthesis.getVoices();
+            return voices.find(voice => voice.lang === 'ja-JP') ||
+                   voices.find(voice => voice.lang && voice.lang.toLowerCase().startsWith('ja')) ||
+                   null;
+        }
+
+        function prepareJapaneseVoice() {
+            japaneseVoice = findJapaneseVoice();
+            if (japaneseVoice) {
+                audioStatus.textContent = '';
+                return;
+            }
+
+            if ('speechSynthesis' in window) {
+                speechSynthesis.addEventListener('voiceschanged', () => {
+                    japaneseVoice = findJapaneseVoice();
+                    if (japaneseVoice) audioStatus.textContent = '';
+                }, { once: true });
+            }
+        }
+
+        // 音声合成でひらがなをゆっくり2回読み上げる。失敗時は一度だけ再試行する。
+        function speakHiragana(char, isRetry = false, onComplete = null, onPlaybackStart = null) {
+            if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+                audioStatus.textContent = 'Speech is not available in this browser. Please try another browser.';
+                return false;
+            }
+
+            japaneseVoice = japaneseVoice || findJapaneseVoice();
+            const currentSequenceId = ++speechSequenceId;
+            speechSynthesis.cancel(); // 前の発話をキャンセル
+
+            const speakOnce = (repetition) => {
+                if (currentSequenceId !== speechSequenceId) return;
+
+                const utterance = new SpeechSynthesisUtterance(char);
+                let repetitionFinished = false;
+                utterance.lang = 'ja-JP';
+                utterance.rate = 0.65;
+                utterance.volume = 1;
+                if (japaneseVoice) utterance.voice = japaneseVoice;
+
+                utterance.onstart = () => {
+                    speechRetryCount = 0;
+                    audioStatus.textContent = '';
+                    setSpaceBgmDucked(true);
+                    if (onPlaybackStart) onPlaybackStart(repetition);
+                };
+                const finishRepetition = () => {
+                    if (repetitionFinished || currentSequenceId !== speechSequenceId) return;
+                    repetitionFinished = true;
+                    setSpaceBgmDucked(false);
+                    if (repetition === 1 && currentSequenceId === speechSequenceId) {
+                        // 1回目と2回目の間を空け、聞き取りやすくする
+                        setTimeout(() => speakOnce(2), 500);
+                    } else if (repetition === 2 && currentSequenceId === speechSequenceId && onComplete) {
+                        onComplete();
+                    }
+                };
+                utterance.onend = finishRepetition;
+                utterance.onerror = (event) => {
+                    setSpaceBgmDucked(false);
+                    if (!isRetry && event.error !== 'canceled' && speechRetryCount < 1) {
+                        repetitionFinished = true;
+                        speechRetryCount++;
+                        setTimeout(() => speakHiragana(char, true, onComplete, onPlaybackStart), 250);
+                        return;
+                    }
+                    if (event.error !== 'canceled' && event.error !== 'interrupted') {
+                        audioStatus.textContent = 'The voice could not be played. Click “🔊 Target” to try again.';
+                    }
+                };
+
+                // 一部ブラウザでonendが通知されない場合も、ゲームを停止させない
+                setTimeout(finishRepetition, 2500);
+                try {
+                    speechSynthesis.speak(utterance);
+                } catch (error) {
+                    finishRepetition();
+                }
+            };
+
+            // cancel直後のspeakが無視されるブラウザがあるため、少し待って1回目を再生する
+            setTimeout(() => speakOnce(1), 80);
+            return true;
+        }
+
+        prepareJapaneseVoice();
+
+        // 音声イベントが欠けたり再読み上げで置き換わったりしても、現在のお題を必ず開始する
+        function revealChoicesForRound(selectedTarget, roundId) {
+            const bothReadingsStarted = roundSpeechStarts.has(1) && roundSpeechStarts.has(2);
+            if (!gameRunning || roundId !== currentRoundId || targetHiragana !== selectedTarget ||
+                targetReadyForEnemies || !bothReadingsStarted) {
+                return;
+            }
+
+            clearTimeout(roundRecoveryTimeoutId);
+            audioStatus.textContent = '';
+            const distractors = HIRAGANA
+                .filter(char => char !== selectedTarget)
+                .sort(() => Math.random() - 0.5)
+                .slice(0, MIN_VISIBLE_ENEMIES - 1);
+            const initialChoices = [selectedTarget, ...distractors]
+                .sort(() => Math.random() - 0.5);
+            const roundSpeed = Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN) + ENEMY_SPEED_MIN;
+
+            initialChoices.forEach((char, index) => {
+                spawnEnemy(char, index, initialChoices.length, roundSpeed);
+            });
+            targetReadyForEnemies = true;
+            lastEnemySpawnTime = performance.now();
+        }
+
+        function playTargetForRound(selectedTarget, roundId) {
+            if (!gameRunning || roundId !== currentRoundId || targetHiragana !== selectedTarget || targetReadyForEnemies) {
+                return;
+            }
+
+            clearTimeout(roundRecoveryTimeoutId);
+            roundSpeechAttempts++;
+            audioStatus.textContent = 'Playing target audio…';
+
+            const speechAvailable = speakHiragana(
+                selectedTarget,
+                false,
+                () => revealChoicesForRound(selectedTarget, roundId),
+                repetition => {
+                    if (roundId === currentRoundId && targetHiragana === selectedTarget) {
+                        roundSpeechStarts.add(repetition);
+                    }
+                }
+            );
+
+            if (!speechAvailable) {
+                audioStatus.textContent = 'Audio is unavailable. Click “🔊 Target” to retry.';
+                return;
+            }
+
+            roundRecoveryTimeoutId = setTimeout(() => {
+                if (!gameRunning || roundId !== currentRoundId || targetHiragana !== selectedTarget || targetReadyForEnemies) {
+                    return;
+                }
+
+                if (roundSpeechStarts.has(1) && roundSpeechStarts.has(2)) {
+                    revealChoicesForRound(selectedTarget, roundId);
+                } else if (roundSpeechAttempts < 2) {
+                    audioStatus.textContent = 'Retrying target audio…';
+                    playTargetForRound(selectedTarget, roundId);
+                } else {
+                    audioStatus.textContent = 'Audio did not play. Click “🔊 Target” to retry.';
+                }
+            }, 6000);
         }
 
         // 新しいターゲットひらがなを選択
         function selectNewTarget() {
+            const roundId = ++currentRoundId;
+            clearTimeout(roundRecoveryTimeoutId);
+            targetReadyForEnemies = false;
+            roundSpeechStarts = new Set();
+            roundSpeechAttempts = 0;
+            enemies = []; // 音声より先に前のお題の文字が落ちないようにする
             targetHiragana = HIRAGANA[Math.floor(Math.random() * HIRAGANA.length)];
-            speakHiragana(targetHiragana);
             updateUI();
+            const selectedTarget = targetHiragana;
+            playTargetForRound(selectedTarget, roundId);
+        }
+
+        function initializeStars() {
+            const count = Math.max(70, Math.min(150, Math.round(canvas.width * canvas.height / 3200)));
+            const colors = ['#ffffff', '#b8dcff', '#8be9fd', '#d8c7ff'];
+            stars = Array.from({ length: count }, () => ({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: 0.45 + Math.random() * 1.75,
+                speed: 0.05 + Math.random() * 0.22,
+                alpha: 0.28 + Math.random() * 0.72,
+                phase: Math.random() * Math.PI * 2,
+                color: colors[Math.floor(Math.random() * colors.length)]
+            }));
+        }
+
+        function drawSpaceBackground(currentTime = 0, animate = true) {
+            const background = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            background.addColorStop(0, '#020617');
+            background.addColorStop(0.48, '#07122d');
+            background.addColorStop(1, '#02040c');
+            ctx.fillStyle = background;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const violetNebula = ctx.createRadialGradient(
+                canvas.width * 0.22, canvas.height * 0.3, 0,
+                canvas.width * 0.22, canvas.height * 0.3, canvas.width * 0.55
+            );
+            violetNebula.addColorStop(0, 'rgba(95, 45, 180, 0.17)');
+            violetNebula.addColorStop(0.45, 'rgba(44, 85, 190, 0.08)');
+            violetNebula.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = violetNebula;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const cyanNebula = ctx.createRadialGradient(
+                canvas.width * 0.82, canvas.height * 0.7, 0,
+                canvas.width * 0.82, canvas.height * 0.7, canvas.width * 0.42
+            );
+            cyanNebula.addColorStop(0, 'rgba(20, 160, 190, 0.11)');
+            cyanNebula.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = cyanNebula;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            stars.forEach(star => {
+                const twinkle = 0.62 + Math.sin(currentTime * 0.002 + star.phase) * 0.38;
+                ctx.globalAlpha = star.alpha * twinkle;
+                ctx.fillStyle = star.color;
+                ctx.shadowColor = star.color;
+                ctx.shadowBlur = star.size > 1.5 ? 7 : 2;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+                if (star.size > 1.75) {
+                    ctx.fillRect(star.x - star.size * 2.1, star.y - 0.35, star.size * 4.2, 0.7);
+                    ctx.fillRect(star.x - 0.35, star.y - star.size * 2.1, 0.7, star.size * 4.2);
+                }
+            });
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+            updateAndDrawBackgroundBattleship(currentTime, animate);
+        }
+
+        function spawnBackgroundBattleship(currentTime) {
+            const direction = Math.random() < 0.5 ? 1 : -1;
+            const duration = 21000 + Math.random() * 5000;
+            const passNumber = backgroundBattleshipPassCount++;
+            backgroundBattleship = {
+                direction,
+                startedAt: currentTime,
+                duration,
+                length: Math.max(62.1, canvas.width * 0.1311),
+                y: canvas.height * (0.22 + Math.random() * 0.28),
+                willFireWaveCannon: passNumber % 2 === 0,
+                waveCannonAt: currentTime + duration * 0.3
+            };
+            canvas.dataset.battleshipDuration = String(Math.round(duration));
+        }
+
+        function drawWaveMotionGunEffect(ship, currentTime) {
+            canvas.dataset.waveCannon = 'idle';
+            if (!ship.willFireWaveCannon) return;
+            const elapsed = currentTime - ship.waveCannonAt;
+            if (elapsed < -850 || elapsed > 850) return;
+
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            if (elapsed < 0) {
+                canvas.dataset.waveCannon = 'charging';
+                const charge = 1 - Math.abs(elapsed) / 850;
+                const pulse = 0.72 + Math.sin(currentTime * 0.035) * 0.28;
+                const chargeRadius = 5 + charge * 18;
+                const chargeGlow = ctx.createRadialGradient(153, 0, 0, 153, 0, chargeRadius);
+                chargeGlow.addColorStop(0, `rgba(255, 255, 255, ${0.95 * pulse})`);
+                chargeGlow.addColorStop(0.25, `rgba(100, 225, 255, ${0.9 * charge})`);
+                chargeGlow.addColorStop(0.65, `rgba(38, 115, 255, ${0.58 * charge})`);
+                chargeGlow.addColorStop(1, 'rgba(0, 70, 255, 0)');
+                ctx.fillStyle = chargeGlow;
+                ctx.beginPath();
+                ctx.arc(153, 0, chargeRadius, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                canvas.dataset.waveCannon = 'firing';
+                const fade = Math.max(0, 1 - elapsed / 850);
+                const extension = Math.min(1, elapsed / 110);
+                const beamEnd = 155 + 920 * extension;
+                ctx.lineCap = 'round';
+                ctx.shadowColor = '#43c8ff';
+                ctx.shadowBlur = 30;
+                ctx.strokeStyle = `rgba(34, 120, 255, ${0.4 * fade})`;
+                ctx.lineWidth = 34 * (0.65 + fade * 0.35);
+                ctx.beginPath();
+                ctx.moveTo(150, 0);
+                ctx.lineTo(beamEnd, 0);
+                ctx.stroke();
+                ctx.strokeStyle = `rgba(78, 220, 255, ${0.78 * fade})`;
+                ctx.lineWidth = 17 * (0.7 + fade * 0.3);
+                ctx.beginPath();
+                ctx.moveTo(150, 0);
+                ctx.lineTo(beamEnd, 0);
+                ctx.stroke();
+                ctx.strokeStyle = `rgba(255, 255, 255, ${0.98 * fade})`;
+                ctx.lineWidth = 5.5;
+                ctx.beginPath();
+                ctx.moveTo(150, 0);
+                ctx.lineTo(beamEnd, 0);
+                ctx.stroke();
+
+                const muzzleGlow = ctx.createRadialGradient(153, 0, 0, 153, 0, 25);
+                muzzleGlow.addColorStop(0, `rgba(255, 255, 255, ${fade})`);
+                muzzleGlow.addColorStop(0.3, `rgba(90, 235, 255, ${0.9 * fade})`);
+                muzzleGlow.addColorStop(1, 'rgba(20, 80, 255, 0)');
+                ctx.fillStyle = muzzleGlow;
+                ctx.beginPath();
+                ctx.arc(153, 0, 25, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        function updateAndDrawBackgroundBattleship(currentTime, animate) {
+            canvas.dataset.waveCannon = 'idle';
+            if (animate && !backgroundBattleship && currentTime >= nextBattleshipAt) {
+                spawnBackgroundBattleship(currentTime);
+            }
+            if (!backgroundBattleship) {
+                canvas.dataset.battleshipVisible = 'false';
+                return;
+            }
+
+            const ship = backgroundBattleship;
+            if (animate && currentTime - ship.startedAt >= ship.duration) {
+                const passNumber = backgroundBattleshipPassCount++;
+                ship.direction *= -1;
+                ship.startedAt = currentTime;
+                ship.duration = 21000 + Math.random() * 5000;
+                ship.y = canvas.height * (0.22 + Math.random() * 0.28);
+                ship.willFireWaveCannon = passNumber % 2 === 0;
+                ship.waveCannonAt = currentTime + ship.duration * 0.3;
+                canvas.dataset.battleshipDuration = String(Math.round(ship.duration));
+            }
+
+            const progress = Math.max(0, Math.min(1, (currentTime - ship.startedAt) / ship.duration));
+            const leftPatrolEdge = ship.length * 0.58;
+            const rightPatrolEdge = canvas.width - ship.length * 0.58;
+            const travelWidth = Math.max(0, rightPatrolEdge - leftPatrolEdge);
+            const baseX = ship.direction > 0
+                ? leftPatrolEdge + travelWidth * progress
+                : rightPatrolEdge - travelWidth * progress;
+            const baseY = ship.y + Math.sin(progress * Math.PI * 2) * 4;
+            const scale = ship.length / 300;
+            canvas.dataset.battleshipVisible = 'true';
+
+            ctx.save();
+            ctx.translate(baseX, baseY);
+            ctx.scale(ship.direction * scale, scale);
+            ctx.globalAlpha = 0.58;
+            ctx.shadowColor = '#6ec8ff';
+            ctx.shadowBlur = 8;
+            drawWaveMotionGunEffect(ship, currentTime);
+
+            if (backgroundBattleshipSprite.complete && backgroundBattleshipSprite.naturalWidth > 0) {
+                const spriteAspect = backgroundBattleshipSprite.naturalHeight / backgroundBattleshipSprite.naturalWidth;
+                const spriteHeight = 300 * spriteAspect;
+                ctx.globalAlpha = 0.76;
+                ctx.shadowColor = '#78c8ff';
+                ctx.shadowBlur = 10;
+                ctx.drawImage(backgroundBattleshipSprite, -150, -spriteHeight / 2, 300, spriteHeight);
+                ctx.restore();
+                return;
+            }
+
+            const hullGradient = ctx.createLinearGradient(0, -24, 0, 24);
+            hullGradient.addColorStop(0, '#d8e2eb');
+            hullGradient.addColorStop(0.45, '#75889a');
+            hullGradient.addColorStop(1, '#263746');
+            ctx.fillStyle = hullGradient;
+            ctx.beginPath();
+            ctx.moveTo(150, 0);
+            ctx.lineTo(112, -17);
+            ctx.lineTo(-102, -20);
+            ctx.lineTo(-143, -8);
+            ctx.lineTo(-128, 12);
+            ctx.lineTo(88, 18);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = '#8f3034';
+            ctx.beginPath();
+            ctx.moveTo(145, 3);
+            ctx.lineTo(88, 18);
+            ctx.lineTo(-128, 12);
+            ctx.lineTo(-137, 4);
+            ctx.lineTo(95, 8);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = '#aebdcc';
+            ctx.fillRect(-43, -38, 58, 19);
+            ctx.fillStyle = '#6f8497';
+            ctx.fillRect(-30, -55, 32, 18);
+            ctx.fillStyle = '#c7d3dd';
+            ctx.fillRect(-20, -67, 15, 13);
+
+            ctx.strokeStyle = '#b8d8ed';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-12, -67);
+            ctx.lineTo(-12, -92);
+            ctx.moveTo(-12, -84);
+            ctx.lineTo(-31, -73);
+            ctx.moveTo(-12, -82);
+            ctx.lineTo(11, -72);
+            ctx.stroke();
+            ctx.fillStyle = '#7fc9ef';
+            ctx.beginPath();
+            ctx.ellipse(-12, -85, 12, 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            [70, 34, -60].forEach((turretX, index) => {
+                ctx.fillStyle = index === 2 ? '#73899b' : '#b3c2cf';
+                ctx.beginPath();
+                ctx.arc(turretX, -22, 11, Math.PI, 0);
+                ctx.lineTo(turretX + 11, -18);
+                ctx.lineTo(turretX - 11, -18);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = '#cfe2ef';
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.moveTo(turretX + 3, -27);
+                ctx.lineTo(turretX + 25, -32);
+                ctx.moveTo(turretX - 2, -27);
+                ctx.lineTo(turretX + 21, -35);
+                ctx.stroke();
+            });
+
+            ctx.fillStyle = '#ffcf54';
+            ctx.shadowColor = '#ff7a1a';
+            ctx.shadowBlur = 18;
+            ctx.beginPath();
+            ctx.ellipse(-143, 1, 7, 10, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(60, 190, 255, 0.7)';
+            ctx.beginPath();
+            ctx.moveTo(-148, -8);
+            ctx.lineTo(-178 - Math.random() * 10, 1);
+            ctx.lineTo(-148, 10);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.restore();
         }
 
         // キャンバスのリサイズ関数
@@ -284,6 +1127,8 @@
             // プレイヤーの位置を再調整
             player.x = canvas.width / 2;
             player.y = canvas.height - player.size * 2;
+            initializeStars();
+            drawSpaceBackground(performance.now(), false);
 
             // UIを更新
             updateUI();
@@ -295,13 +1140,91 @@
 
         // UIの更新
         function updateUI() {
-            scoreDisplay.textContent = `スコア: ${score}`;
-            lifeDisplay.textContent = `ライフ: ${lives}`;
-            targetDisplay.textContent = `🔊 お題: ${targetHiragana || '?'}`;
+            scoreDisplay.textContent = `Score: ${score}`;
+            lifeDisplay.textContent = `Lives: ${lives}`;
+            targetDisplay.textContent = `🔊 Target: ${targetHiragana ? HIRAGANA_ROMAJI[targetHiragana] : '?'}`;
+        }
+
+        function triggerPlayerReflection(explosionX) {
+            playerReflectionStartedAt = performance.now();
+            playerReflectionSourceX = explosionX;
         }
 
         // プレイヤー（大砲）の描画をよりリアルに
         function drawPlayer() {
+            const reflectionAge = performance.now() - playerReflectionStartedAt;
+            const reflectionStrength = reflectionAge >= 0 && reflectionAge < PLAYER_REFLECTION_DURATION
+                ? Math.pow(1 - reflectionAge / PLAYER_REFLECTION_DURATION, 1.35)
+                : 0;
+            const reflectionDirection = Math.max(-1, Math.min(1, (playerReflectionSourceX - player.x) / Math.max(1, canvas.width * 0.35)));
+
+            if (reflectionStrength > 0) {
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                const glowX = player.x + reflectionDirection * 14;
+                const glow = ctx.createRadialGradient(glowX, player.y - 8, 0, glowX, player.y - 8, 54);
+                glow.addColorStop(0, `rgba(255, 250, 215, ${0.68 * reflectionStrength})`);
+                glow.addColorStop(0.28, `rgba(255, 175, 55, ${0.42 * reflectionStrength})`);
+                glow.addColorStop(0.65, `rgba(34, 211, 238, ${0.18 * reflectionStrength})`);
+                glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                ctx.fillStyle = glow;
+                ctx.beginPath();
+                ctx.arc(glowX, player.y - 8, 54, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            if (playerSprite.complete && playerSprite.naturalWidth > 0) {
+                ctx.save();
+                ctx.imageSmoothingEnabled = true;
+                if (reflectionStrength > 0) {
+                    const shadowOffset = reflectionDirection * 5;
+                    ctx.filter = `brightness(${1 + reflectionStrength * 1.35}) saturate(${1 + reflectionStrength * 0.9}) drop-shadow(${shadowOffset}px -2px ${7 + reflectionStrength * 10}px rgba(255, 174, 58, ${0.8 * reflectionStrength}))`;
+                }
+                ctx.drawImage(
+                    playerSprite,
+                    player.x - PLAYER_SPRITE_WIDTH / 2,
+                    player.y - PLAYER_SPRITE_HEIGHT / 2,
+                    PLAYER_SPRITE_WIDTH,
+                    PLAYER_SPRITE_HEIGHT
+                );
+                ctx.restore();
+
+                if (reflectionStrength > 0) {
+                    ctx.save();
+                    ctx.beginPath();
+                    if (Math.abs(reflectionDirection) < 0.15) {
+                        ctx.rect(
+                            player.x - PLAYER_SPRITE_WIDTH / 2,
+                            player.y - PLAYER_SPRITE_HEIGHT / 2,
+                            PLAYER_SPRITE_WIDTH,
+                            PLAYER_SPRITE_HEIGHT * 0.62
+                        );
+                    } else {
+                        const highlightFromRight = reflectionDirection > 0;
+                        ctx.rect(
+                            highlightFromRight ? player.x : player.x - PLAYER_SPRITE_WIDTH / 2,
+                            player.y - PLAYER_SPRITE_HEIGHT / 2,
+                            PLAYER_SPRITE_WIDTH / 2,
+                            PLAYER_SPRITE_HEIGHT
+                        );
+                    }
+                    ctx.clip();
+                    ctx.globalCompositeOperation = 'screen';
+                    ctx.globalAlpha = 0.62 * reflectionStrength;
+                    ctx.filter = 'brightness(2.2) sepia(1) saturate(5) hue-rotate(-12deg)';
+                    ctx.drawImage(
+                        playerSprite,
+                        player.x - PLAYER_SPRITE_WIDTH / 2,
+                        player.y - PLAYER_SPRITE_HEIGHT / 2,
+                        PLAYER_SPRITE_WIDTH,
+                        PLAYER_SPRITE_HEIGHT
+                    );
+                    ctx.restore();
+                }
+                return;
+            }
+
             // 大砲の本体 (台座)
             ctx.fillStyle = '#63b3ed'; // 青
             const baseX = player.x - player.size * 0.7 / 2;
@@ -358,6 +1281,67 @@
             ctx.restore();
         }
 
+        // 正解ターゲットの位置に爆発を生成
+        function createExplosion(x, y) {
+            const colors = ['#ffffff', '#f6e05e', '#ff9f43', '#ff5e3a', '#22d3ee'];
+            const particles = Array.from({ length: 30 }, (_, index) => {
+                const angle = (Math.PI * 2 * index) / 30 + Math.random() * 0.25;
+                const speed = 2.5 + Math.random() * 5;
+                return {
+                    x: 0,
+                    y: 0,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    size: 2 + Math.random() * 5,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    life: 1
+                };
+            });
+
+            explosions.push({ x, y, life: 1, particles });
+        }
+
+        // 発光リングと粒子を更新・描画
+        function updateAndDrawExplosions() {
+            for (let i = explosions.length - 1; i >= 0; i--) {
+                const explosion = explosions[i];
+                explosion.life -= 0.018;
+                if (explosion.life <= 0) {
+                    explosions.splice(i, 1);
+                    continue;
+                }
+
+                ctx.save();
+                ctx.translate(explosion.x, explosion.y);
+                ctx.globalCompositeOperation = 'lighter';
+
+                const ringRadius = (1 - explosion.life) * 55;
+                ctx.strokeStyle = `rgba(255, 214, 64, ${Math.max(0, explosion.life)})`;
+                ctx.lineWidth = 3 + explosion.life * 5;
+                ctx.beginPath();
+                ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+                ctx.stroke();
+
+                explosion.particles.forEach(particle => {
+                    particle.x += particle.vx;
+                    particle.y += particle.vy;
+                    particle.vx *= 0.96;
+                    particle.vy *= 0.96;
+                    particle.life = explosion.life;
+
+                    ctx.globalAlpha = Math.max(0, particle.life);
+                    ctx.fillStyle = particle.color;
+                    ctx.shadowColor = particle.color;
+                    ctx.shadowBlur = 10;
+                    ctx.beginPath();
+                    ctx.arc(particle.x, particle.y, particle.size * particle.life, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                ctx.restore();
+            }
+        }
+
         // 弾の更新（移動）
         function updateBullets() {
             for (let i = bullets.length - 1; i >= 0; i--) {
@@ -383,7 +1367,8 @@
                         lives--;
                         updateUI();
                         if (lives <= 0) {
-                            endGame();
+                            endGame(targetHiragana);
+                            return;
                         }
                     }
                 }
@@ -391,28 +1376,46 @@
         }
 
         // 敵（ひらがな）の生成
-        function spawnEnemy() {
-            // 画面上にターゲットがなければ必ず出す、あれば30%の確率
+        function spawnEnemy(charOverride = null, positionIndex = null, positionCount = null, speedOverride = null) {
+            // 画面上に正解がなければ正解を出し、あれば別の文字を出す
             const hasTarget = enemies.some(e => e.char === targetHiragana);
-            let char;
-            if (targetHiragana && (!hasTarget || Math.random() < 0.3)) {
-                char = targetHiragana;
-            } else {
-                char = HIRAGANA[Math.floor(Math.random() * HIRAGANA.length)];
-            }
+            const distractorChoices = HIRAGANA.filter(char =>
+                char !== targetHiragana && !enemies.some(enemy => enemy.char === char)
+            );
+            const char = charOverride || (!hasTarget
+                ? targetHiragana
+                : distractorChoices[Math.floor(Math.random() * distractorChoices.length)]);
 
-            const x = Math.random() * (canvas.width - ENEMY_SIZE) + ENEMY_SIZE / 2; // ランダムなX座標
-            const speed = Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN) + ENEMY_SPEED_MIN; // ランダムな速度
-
+            const x = positionIndex !== null && positionCount
+                ? (canvas.width / positionCount) * (positionIndex + 0.5)
+                : Math.random() * (canvas.width - ENEMY_SIZE) + ENEMY_SIZE / 2;
+            const speed = speedOverride ?? Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN) + ENEMY_SPEED_MIN;
             enemies.push({
                 x: x,
-                y: -ENEMY_SIZE / 2, // 画面上部から出現
+                y: ENEMY_SIZE / 2, // 出現直後から文字全体が見える位置
                 size: ENEMY_SIZE,
                 speed: speed,
                 char: char,
                 rotation: 0,
                 rotationSpeed: 0
             });
+        }
+
+        // 候補が少なくなったら即座に補充し、選択肢を常に3文字以上に保つ
+        function ensureMinimumEnemies() {
+            const hasTarget = enemies.some(enemy => enemy.char === targetHiragana);
+            if (targetReadyForEnemies && !hasTarget) {
+                // 正解が落下した直後も、必ず画面上に正解候補を復活させる
+                if (enemies.length >= MAX_VISIBLE_ENEMIES) {
+                    const distractorIndex = enemies.findIndex(enemy => enemy.char !== targetHiragana);
+                    if (distractorIndex >= 0) enemies.splice(distractorIndex, 1);
+                }
+                spawnEnemy(targetHiragana);
+            }
+
+            while (targetReadyForEnemies && enemies.length < MIN_VISIBLE_ENEMIES) {
+                spawnEnemy();
+            }
         }
 
         // 衝突判定 (AABB - Axis-Aligned Bounding Box)
@@ -453,7 +1456,9 @@
                         if (enemy.char === targetHiragana) {
                             // 正解！ポイント加算して新しいターゲットを選択
                             score += POINTS_CORRECT;
-                            largeEnemyHitSynth.triggerAttackRelease('C4', '8n');
+                            createExplosion(enemy.x, enemy.y);
+                            triggerPlayerReflection(enemy.x);
+                            playExplosionSound();
                             updateUI();
                             selectNewTarget();
                         } else {
@@ -473,10 +1478,11 @@
                 return;
             }
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height); // キャンバスをクリア
+            drawSpaceBackground(currentTime, true);
 
-            // 敵の出現
-            if (currentTime - lastEnemySpawnTime > ENEMY_SPAWN_INTERVAL) {
+            // 選択肢を常に3文字以上に保ち、最大5文字までゆっくり追加する
+            ensureMinimumEnemies();
+            if (targetReadyForEnemies && enemies.length < MAX_VISIBLE_ENEMIES && currentTime - lastEnemySpawnTime > ENEMY_SPAWN_INTERVAL) {
                 spawnEnemy();
                 lastEnemySpawnTime = currentTime;
             }
@@ -486,6 +1492,7 @@
             bullets.forEach(drawBullet); // 弾を描画
             updateEnemies(); // 敵を更新
             enemies.forEach(drawEnemy); // 敵を描画
+            updateAndDrawExplosions(); // 爆発エフェクトを描画
             handleCollisions(); // 衝突判定
 
             animationFrameId = requestAnimationFrame(gameLoop); // 次のフレームを要求
@@ -493,27 +1500,37 @@
 
         // ゲームの開始
         async function startGame() { // async キーワードを追加
+            await prepareGameAudio();
             // Tone.jsのコンテキストを初期化 (初回クリックでオーディオを有効にするため)
-            if (Tone.context.state !== 'running') {
-                await Tone.context.resume(); // await を追加して Promise の解決を待つ
+            if (toneAvailable && Tone.context.state !== 'running') {
+                await Tone.start(); // ユーザー操作を起点にオーディオを有効化
+            }
+
+            prepareJapaneseVoice();
+            if (!gameAudioContext) {
+                audioStatus.textContent = 'Background music and sound effects are unavailable in this browser.';
             }
 
             player.x = canvas.width / 2;
             player.y = canvas.height - player.size * 2;
             bullets = [];
             enemies = [];
+            explosions = [];
+            backgroundBattleship = null;
+            nextBattleshipAt = performance.now();
+            backgroundBattleshipPassCount = 0;
+            playerReflectionStartedAt = -Infinity;
             score = 0;
             lives = INITIAL_LIVES;
             gameRunning = true;
+            targetReadyForEnemies = false;
             messageBox.style.display = 'none'; // メッセージボックスを非表示に
             updateUI();
             lastEnemySpawnTime = performance.now(); // ゲーム開始時のタイムスタンプをリセット
             animationFrameId = requestAnimationFrame(gameLoop); // ゲームループ開始
 
             // BGMを開始
-            if (!bgmPart.state || bgmPart.state !== 'started') {
-                bgmPart.start();
-            }
+            startSpaceBgm();
 
             // ターゲットひらがなを選択して音声を再生
             selectNewTarget();
@@ -521,22 +1538,32 @@
             // 定期的にターゲットの音声を再生（5秒ごと）
             clearInterval(speakIntervalId);
             speakIntervalId = setInterval(() => {
-                if (gameRunning && targetHiragana) {
+                if (gameRunning && targetHiragana && targetReadyForEnemies) {
                     speakHiragana(targetHiragana);
                 }
             }, 5000);
         }
 
         // ゲームオーバー
-        function endGame() {
+        function endGame(missedChar = '') {
             gameRunning = false;
+            targetReadyForEnemies = false;
+            currentRoundId++;
+            clearTimeout(roundRecoveryTimeoutId);
+            enemies = [];
+            bullets = [];
+            explosions = [];
+            playerReflectionStartedAt = -Infinity;
+            drawSpaceBackground(performance.now(), false);
+            drawPlayer();
             gameOverSynth.triggerAttackRelease(['C3', 'G#2'], '1s'); // ゲームオーバー音を再生
-            messageText.textContent = `ゲームオーバー！ スコア: ${score}`;
-            startButton.textContent = 'もう一度プレイ';
+            const missedAnswer = missedChar ? `\nMissed: ${missedChar} (${HIRAGANA_ROMAJI[missedChar]})` : '';
+            messageText.textContent = `Game Over!\nScore: ${score}${missedAnswer}`;
+            startButton.textContent = 'Play Again';
             messageBox.style.display = 'block'; // メッセージボックスを表示
 
             // BGMを停止
-            bgmPart.stop();
+            stopSpaceBgm();
 
             // 音声再生を停止
             clearInterval(speakIntervalId);
@@ -550,17 +1577,12 @@
             if (!gameRunning) return;
 
             // 大砲の砲身の先端から弾を発射する位置を計算
-            const barrelHeight = PLAYER_SIZE * 0.7; // drawPlayer関数からの値
-            const cannonBodyHeight = PLAYER_SIZE * 0.5;
-            const cannonBaseHeight = PLAYER_SIZE * 0.3;
-            const bulletYOffset = PLAYER_SIZE / 2 - cannonBaseHeight - cannonBodyHeight - barrelHeight;
-
             bullets.push({
                 x: player.x,
-                y: player.y + bulletYOffset,
+                y: player.y - PLAYER_SPRITE_HEIGHT / 2 + 8,
                 size: BULLET_SIZE // 固定された単一サイズ
             });
-            bulletSynth.triggerAttackRelease('C5', '16n'); // 弾の発射音を再生
+            playLaserSound();
         }
 
         // イベントリスナー
@@ -571,8 +1593,8 @@
                 const rect = canvas.getBoundingClientRect();
                 player.x = e.clientX - rect.left;
                 // プレイヤーがキャンバスの範囲外に出ないように制限
-                if (player.x < player.size * 0.7 / 2) player.x = player.size * 0.7 / 2; // 大砲の台座の幅を考慮
-                if (player.x > canvas.width - player.size * 0.7 / 2) player.x = canvas.width - player.size * 0.7 / 2;
+                if (player.x < PLAYER_SPRITE_WIDTH / 2) player.x = PLAYER_SPRITE_WIDTH / 2;
+                if (player.x > canvas.width - PLAYER_SPRITE_WIDTH / 2) player.x = canvas.width - PLAYER_SPRITE_WIDTH / 2;
             }
         });
 
@@ -588,8 +1610,8 @@
                 const touch = e.touches[0];
                 const rect = canvas.getBoundingClientRect();
                 player.x = touch.clientX - rect.left;
-                if (player.x < player.size * 0.7 / 2) player.x = player.size * 0.7 / 2;
-                if (player.x > canvas.width - player.size * 0.7 / 2) player.x = canvas.width - player.size * 0.7 / 2;
+                if (player.x < PLAYER_SPRITE_WIDTH / 2) player.x = PLAYER_SPRITE_WIDTH / 2;
+                if (player.x > canvas.width - PLAYER_SPRITE_WIDTH / 2) player.x = canvas.width - PLAYER_SPRITE_WIDTH / 2;
             }
         });
 
@@ -606,7 +1628,15 @@
         // ターゲットの音声をもう一度聞く
         targetDisplay.addEventListener('click', () => {
             if (gameRunning && targetHiragana) {
-                speakHiragana(targetHiragana);
+                const selectedTarget = targetHiragana;
+                const roundId = currentRoundId;
+                if (targetReadyForEnemies) {
+                    speakHiragana(selectedTarget);
+                } else {
+                    roundSpeechStarts = new Set();
+                    roundSpeechAttempts = 0;
+                    playTargetForRound(selectedTarget, roundId);
+                }
             }
         });
 
@@ -616,7 +1646,7 @@
         // });
 
         // 初期メッセージ表示
-        messageText.textContent = '音を聞いて正しいひらがなを撃とう！';
+        messageText.textContent = 'Listen and shoot the correct hiragana!';
         messageBox.style.display = 'block';
     </script>
 </body>
